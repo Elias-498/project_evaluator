@@ -1,11 +1,14 @@
 """
 project_checker.py
 
-Scans a directory of software projects and gives each one a score based on
-a few simple checks: whether it uses version control, has documentation,
-includes automated tests, what languages it uses, and how many TODO
-comments are still left in the code. All of these checks contribute to an
-overall numeric project score.
+Scans a directory of projects and scores each one based on a set of checks:
+whether it uses version control, has documentation, includes tests, and
+how many TODO comments are still left in the code. The report also counts
+how many files are written in each programming language,
+just to give a sense of what the project is built with. Each check
+contributes to an overall numeric project score, and any problems found
+are recorded as "concerns" so they can be explained in the
+final report.
 
 """
 
@@ -53,23 +56,24 @@ class Project:
         self.path = path
 
         self.project_score : int = MAX_PROJECT_SCORE
-        self.concern : List[str] = []
+        self.concerns : List[str] = []
         self.programming_languages : Dict[str, int] = defaultdict(int)
-        self.todo : List[str] = []
+        self.todo_items : List[str] = []
 
         self.has_git = False
         self.has_readme = False
         self.has_tests = False
 
-    def add_concern(self, description: str, penalty: int) -> None:
+    def add_concerns(self, description: str, penalty: int) -> None:
         """
         Records a concern found with this project and deducts score.
+
         :param description: Explanation of the concern found during analysis
-        :param penalty: How many  points should be deducted from the project's score because of concern
+        :param penalty: How many points should be deducted from the project's score because of the concern
         :return: None
         """
-        self.concern.append(description)
-        self.project_score -= max(MIN_PROJECT_SCORE, self.project_score - penalty)
+        self.concerns.append(description)
+        self.project_score = max(MIN_PROJECT_SCORE, self.project_score - penalty)
 
 
 class ProjectScanner:
@@ -87,24 +91,24 @@ class ProjectScanner:
             if entry.is_dir():
                 projects.append(Project(entry.name, entry))
 
-            return projects
+        return projects
 
 class DocumentationAnalyzer:
-    """"
+    """
     Checks if a project has a README file.
 
     Analyzer checks the project's main folder to see if it has a README
     file. It looks for any of the usual README names, and if none are found,
     it marks the project as missing documentation and applies a score penalty
-     """
+    """
     def analyze(self, project: Project) -> None:
         for filename in README_FILENAME:
             if (project.path / filename).exists():
                 project.has_readme = True
                 break
 
-            if not project.has_readme:
-                project.add_concern("Missing README documentation", PENALTY_MISSING_README)
+        if not project.has_readme:
+            project.add_concerns("Missing README documentation", PENALTY_MISSING_README)
 
 
 class GitAnalyzer:
@@ -113,7 +117,7 @@ class GitAnalyzer:
     def analyze(self, project: Project) -> None:
         project.has_git = (project.path / ".git").exists()
         if not project.has_git:
-            project.add_concern("No Git repository", PENALTY_MISSING_GIT)
+            project.add_concerns("No Git repository", PENALTY_MISSING_GIT)
 
 
 class TestAnalyzer:
@@ -124,7 +128,7 @@ class TestAnalyzer:
             (project.path / folder_name).exists() for folder_name in TEST_FILENAME
         )
         if not project.has_tests:
-            project.add_concern("No test/tests found", PENALTY_MISSING_TESTS)
+            project.add_concerns("No test/tests found", PENALTY_MISSING_TESTS)
 
 
 class CodeAnalyzer:
@@ -143,19 +147,18 @@ class CodeAnalyzer:
         :return: None
         """
         for file_path in self.source_files(project.path):
-            self._record_language(project, file_path)
+            self._record_programming_language(project, file_path)
             self._record_todos(project, file_path)
 
-        # Too many todos found in project
         if len(project.todo_items) > EXCESSIVE_TODO_THRESHOLD:
-            project.add_concern(
+            project.add_concerns(
                 f"Too many TODOs left in code ({len(project.todo_items)} found)",
                 PENALTY_EXCESSIVE_TODOS,
                 )
 
-     def source_files(self, root: Path):
+    def source_files(self, root: Path):
         """
-        Skips source files
+        Yield every source file under root and skips ignored directories.
 
         Skips folders that should not be analyzed, such as virtual
         environments, cache directories, or other ignored paths
@@ -179,9 +182,7 @@ class CodeAnalyzer:
         language = EXTENSIONS_TO_HUMAN_LANGUAGE.get(file_path.suffix)
         if language is None:
             return
-
-        if project.languages[language] == 0:
-            project.languages[language] = 1
+        project.programming_languages[language] += 1
 
     def _record_todos(self, project: Project, file_path: Path) -> None:
         """
@@ -256,10 +257,9 @@ class ReportGenerator:
 
     @staticmethod
     def _render_languages(project: Project) -> str:
-        if not project.languages:
+        if not project.programming_languages:
             return "No supported languages found"
-        return "\n".join(f"{language}: {lines} lines" for language, lines in project.languages.items())
-
+        return "\n".join(f"{language}: {count} file(s)" for language, count in project.programming_languages.items())
 
     @staticmethod
     def _render_list(items: List[str], empty_message: str) -> str:
@@ -289,7 +289,7 @@ class ProjectScoreChecker:
         Look through the given directory, find all projects inside it,
         analyze each one, and return a full report
 
-        :param directory: Contain projects to be analyzed
+        :param directory: Contains projects to be analyzed
         :return: A report summarizing all projects found  in the folder
         """
         projects = self.scanner.scan(directory)
@@ -305,4 +305,189 @@ def main() -> None:
     print(checker.check(Path(folder)))
 
 
+class TestProject(unittest.TestCase):
+    """
+    Unit tests for the Project data model.
+    """
 
+    def test_add_concerns_deducts_points(self) -> None:
+        project = Project("demo1", Path("."))
+        project.add_concerns("missing README", 5) # project score = 100 - 5
+        self.assertEqual(project.project_score, 95)
+        self.assertIn("missing README", project.concerns)
+
+    def test_project_score_never_goes_below_zero(self) -> None:
+        project = Project("demo", Path("."))
+        project.add_concerns("No project and passed due time", 1000)
+        self.assertEqual(project.project_score, MIN_PROJECT_SCORE)
+
+
+class TestProjectScanner(unittest.TestCase):
+    """
+    Unit tests for ProjectScanner.
+    """
+
+    def test_finds_only_directories(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "project_a").mkdir()
+            (root / "project_b").mkdir()
+            (root / "not_a_project.txt").write_text("hello")
+
+            projects = ProjectScanner().scan(root)
+            project_names = {project.name for project in projects}
+
+            self.assertEqual(project_names, {"project_a", "project_b"})
+
+
+class TestDocumentationAnalyzer(unittest.TestCase):
+    def test_detects_existing_readme(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "README.md").write_text("# Demo")
+            project = Project("demo", root)
+
+            DocumentationAnalyzer().analyze(project)
+
+            self.assertTrue(project.has_readme)
+            self.assertEqual(project.concerns, [])
+
+    def test_missing_readme(self) -> None:
+        with TemporaryDirectory() as tmp:
+            project = Project("demo", Path(tmp))
+
+            DocumentationAnalyzer().analyze(project)
+
+            self.assertFalse(project.has_readme)
+            self.assertEqual(project.project_score, MAX_PROJECT_SCORE - PENALTY_MISSING_README)
+
+
+class TestGitAnalyzer(unittest.TestCase):
+    def test_detects_git_folder(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / ".git").mkdir()
+            project = Project("demo", root)
+
+            GitAnalyzer().analyze(project)
+
+            self.assertTrue(project.has_git)
+
+    def test_missing_git_folder(self) -> None:
+        with TemporaryDirectory() as tmp:
+            project = Project("demo", Path(tmp))
+
+            GitAnalyzer().analyze(project)
+
+            self.assertFalse(project.has_git)
+            self.assertIn("No Git repository", project.concerns)
+
+
+class TestTestAnalyzer(unittest.TestCase):
+    def test_detects_tests_folder(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "tests").mkdir()
+            project = Project("demo", root)
+
+            TestAnalyzer().analyze(project)
+
+            self.assertTrue(project.has_tests)
+
+    def test_missing_tests_folder(self) -> None:
+        with TemporaryDirectory() as tmp:
+            project = Project("demo", Path(tmp))
+
+            TestAnalyzer().analyze(project)
+
+            self.assertFalse(project.has_tests)
+            self.assertEqual(project.project_score, MAX_PROJECT_SCORE - PENALTY_MISSING_TESTS)
+
+
+class TestCodeAnalyzer(unittest.TestCase):
+    def test_detects_programming_language(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "main.py").write_text("line1\nline2\nline3\n")
+            project = Project("demo", root)
+
+            CodeAnalyzer().analyze(project)
+
+            self.assertEqual(project.programming_languages["Python"], 1)
+
+    def test_finds_todo_comments(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "main.py").write_text("print('hi')\n# TODO: fix this later\n")
+            project = Project("demo", root)
+
+            CodeAnalyzer().analyze(project)
+
+            self.assertEqual(len(project.todo_items), 1)
+            self.assertIn("main.py:2", project.todo_items[0])
+
+    def test_ignores_git_directory_contents(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            git_dir = root / ".git"
+            git_dir.mkdir()
+            (git_dir / "config.py").write_text("# TODO: should never be counted\n")
+            project = Project("demo", root)
+
+            CodeAnalyzer().analyze(project)
+
+            self.assertEqual(project.todo_items, [])
+            self.assertEqual(project.programming_languages, {})
+
+    def test_excessive_todos_flagged_as_concern(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            todo_lines = "\n".join(f"# TODO item {i}" for i in range(EXCESSIVE_TODO_THRESHOLD + 1))
+            (root / "main.py").write_text(todo_lines)
+            project = Project("demo", root)
+
+            CodeAnalyzer().analyze(project)
+
+            self.assertTrue(any("Too many TODOs left in code" in concern for concern in project.concerns))
+
+
+class TestProjectScoreCheckerIntegration(unittest.TestCase):
+    """End-to-end test running the full pipeline against a small fake project."""
+
+    def test_full_pipeline_on_well_formed_project(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            project_dir = root / "well_formed_project"
+            project_dir.mkdir()
+            (project_dir / "README.md").write_text("# Well Formed Project")
+            (project_dir / ".git").mkdir()
+            (project_dir / "tests").mkdir()
+            (project_dir / "main.py").write_text("print('hello world')\n")
+
+            report = ProjectScoreChecker().check(root)
+
+            self.assertIn("well_formed_project", report)
+            self.assertIn("Project Score: 100/100", report)
+            self.assertIn("Python: 1 file(s)", report)
+
+    def test_full_pipeline_on_neglected_project(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            project_dir = root / "neglected_project"
+            project_dir.mkdir()
+            (project_dir / "main.py").write_text("print('no tests, no docs')\n")
+
+            report = ProjectScoreChecker().check(root)
+
+            expected_score = (MAX_PROJECT_SCORE - PENALTY_MISSING_README - PENALTY_MISSING_GIT - PENALTY_MISSING_TESTS)
+
+            self.assertIn(f"Project Score: {expected_score}/100", report)
+            self.assertIn("Missing README documentation", report)
+            self.assertIn("No Git repository", report)
+            self.assertIn("No test/tests found", report)
+
+
+if __name__ == "__main__":
+    import sys
+    print("Running automated test suite for project_checker.py...\n")
+    unittest.main(verbosity=2, argv=[sys.argv[0]])
