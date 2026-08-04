@@ -89,7 +89,7 @@ class ProjectScanner:
 
             return projects
 
-class DoucmentationAnalyzer:
+class DocumentationAnalyzer:
     """"
     Checks if a project has a README file.
 
@@ -151,7 +151,7 @@ class CodeAnalyzer:
             project.add_concern(
                 f"Too many TODOs left in code ({len(project.todo_items)} found)",
                 PENALTY_EXCESSIVE_TODOS,
-            )
+                )
 
      def source_files(self, root: Path):
         """
@@ -266,4 +266,43 @@ class ReportGenerator:
         if not items:
             return empty_message
         return "\n".join(f"- {item}" for item in items)
+
+
+class ProjectScoreChecker:
+    """
+    Handles whole process of scoring projects: scanning a folder,
+    running all analyzers, and producing a final report.
+    """
+
+    def __init__(self) -> None:
+        self.scanner = ProjectScanner()
+        self.analyzers = [
+            DocumentationAnalyzer(),
+            GitAnalyzer(),
+            TestAnalyzer(),
+            CodeAnalyzer(),
+        ]
+        self.reporter = ReportGenerator()
+
+    def check(self, directory: Path) -> str:
+        """
+        Look through the given directory, find all projects inside it,
+        analyze each one, and return a full report
+
+        :param directory: Contain projects to be analyzed
+        :return: A report summarizing all projects found  in the folder
+        """
+        projects = self.scanner.scan(directory)
+        for project in projects:
+            for analyzer in self.analyzers:
+                analyzer.analyze(project)
+        return self.reporter.generate(projects)
+
+
+def main() -> None:
+    folder = input("Enter projects folder: ").strip()
+    checker = ProjectScoreChecker()
+    print(checker.check(Path(folder)))
+
+
 
