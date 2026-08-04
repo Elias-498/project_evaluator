@@ -26,8 +26,8 @@ EXTENSIONS_TO_HUMAN_LANGUAGE = {
     ".cpp": "C++",
 }
 
-README_FILE_NAME = ("README.md", "README.txt", "README")
-TEST_FILE_NAME = ("tests", "test")
+README_FILENAME = ("README.md", "README.txt", "README")
+TEST_FILENAME = ("tests", "test")
 
 # Project score penalties, kept as named constants so the scoring policy is visible
 PENALTY_MISSING_README = 5
@@ -40,7 +40,7 @@ MAX_PROJECT_SCORE = 100
 MIN_PROJECT_SCORE = 0
 
 
-class project:
+class Project:
     """
     Represents a single project and stores all results collected during analysis.
 
@@ -71,3 +71,57 @@ class project:
         self.concern.append(description)
         self.project_score -= max(MIN_PROJECT_SCORE, self.project_score - penalty)
 
+
+class ProjectScanner:
+    """
+    Finds project folders inside a given parent directory.
+
+    This scanner looks at the subdirectories of the provided path
+    and treats each one as a potential project
+    """
+
+    def scan(self, directory: Path) -> List[Project]:
+        """Return a Project object for each subfolder inside the given directory."""
+        projects = []
+        for  entry in directory.iterdir():
+            if entry.is_dir():
+                projects.append(Project(entry.name, entry))
+
+            return projects
+
+class DoucmentationAnalyzer:
+    """"
+    Checks if a project has a README file.
+
+    Analyzer checks the project's main folder to see if it has a README
+    file. It looks for any of the usual README names, and if none are found,
+    it marks the project as missing documentation and applies a score penalty
+     """
+    def analyze(self, project: Project) -> None:
+        for filename in README_FILE_NAME:
+            if (project.path / filename).exists():
+                project.has_readme = True
+                break
+
+            if not project.has_readme:
+                project.add_concern("Missing README documentation", PENALTY_MISSING_README)
+
+
+class GitAnalyzer:
+    """Checks if a project is tracked with Git."""
+
+    def analyze(self, project: Project) -> None:
+        project.has_git = (project.path / ".git").exists()
+        if not project.has_git:
+            project.add_concern("No Git repository", PENALTY_MISSING_GIT)
+
+
+class TestAnalyzer:
+    """Checks whether a project has a test/tests folder."""
+
+    def analyze(self, project: Project) -> None:
+        project.has_tests = any(
+            (project.path / folder_name).exists() for folder_name in TEST_FILENAME
+        )
+        if not project.has_tests:
+            project.add_concern("No test/tests found", PENALTY_MISSING_TESTS)
