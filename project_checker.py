@@ -98,7 +98,7 @@ class DoucmentationAnalyzer:
     it marks the project as missing documentation and applies a score penalty
      """
     def analyze(self, project: Project) -> None:
-        for filename in README_FILE_NAME:
+        for filename in README_FILENAME:
             if (project.path / filename).exists():
                 project.has_readme = True
                 break
@@ -125,3 +125,145 @@ class TestAnalyzer:
         )
         if not project.has_tests:
             project.add_concern("No test/tests found", PENALTY_MISSING_TESTS)
+
+
+class CodeAnalyzer:
+    """
+    Analyzes a project's source files to determine which programming
+    languages are used and to collect any TODO comments left in the code.
+
+    This helps identify unfinished work and gives a rough picture of
+    how many lines of code is written in each language.
+    """
+
+    def analyze(self, project: Project) -> None:
+        """
+        Checks through all source files in the project and updates its language statistics and TODO list.
+        :param project: project being analyzed
+        :return: None
+        """
+        for file_path in self.source_files(project.path):
+            self._record_language(project, file_path)
+            self._record_todos(project, file_path)
+
+        # Too many todos found in project
+        if len(project.todo_items) > EXCESSIVE_TODO_THRESHOLD:
+            project.add_concern(
+                f"Too many TODOs left in code ({len(project.todo_items)} found)",
+                PENALTY_EXCESSIVE_TODOS,
+            )
+
+     def source_files(self, root: Path):
+        """
+        Skips source files
+
+        Skips folders that should not be analyzed, such as virtual
+        environments, cache directories, or other ignored paths
+        """
+        for path in root.rglob("*"):
+            # Skip if not a file
+            if not path.is_file():
+                continue
+            if any(ignored in path.parts for ignored in IGNORED_DIRECTORY_NAMES):
+                continue
+            yield path
+
+    def _record_programming_language(self, project: Project, file_path: Path) -> None:
+        """
+        Records which programming language the project uses based on the file's
+        extension
+
+        :param project: project being analyzed
+        :param file_path: The files whose extension is used to identify the language.
+        """
+        language = EXTENSIONS_TO_HUMAN_LANGUAGE.get(file_path.suffix)
+        if language is None:
+            return
+
+        if project.languages[language] == 0:
+            project.languages[language] = 1
+
+    def _record_todos(self, project: Project, file_path: Path) -> None:
+        """
+        Scans a file for TODO comments and records each one with its line number.
+
+        :param project: project being analyzed
+        :param file_path: The file  being scanned for TODO comments
+        """
+        try:
+            text = file_path.read_text()
+        except Exception:
+            return
+
+        for i, line in enumerate(text.splitlines(), start=1):
+            if "TODO" in line:
+                project.todo_items.append(f"{file_path.name}:{i}")
+
+
+class ReportGenerator:
+    """
+    Turns analyzed Project into a readable report.
+
+    Each project is rendered as its own section, showing the results of all
+    checks, the languages detected, any TODOs found, concerns raised, and
+    the final project score.
+    """
+
+    def generate(self, projects: List[Project]) -> str:
+        """
+        Build the full report as a single string.
+        """
+        sections = [self._render_project(project) for project in projects]
+        return "\n".join(sections)
+
+
+    def _render_project(self, project: Project) -> str:
+        """
+        Renders a single project's results into a readable text block
+
+        Includes checks for Git, README and tests,
+        programming language used,
+        TODO items,
+        concerns raised and
+        final project score.
+        """
+        lines = [
+            "\n" + "=" * 40,
+            f"Project: {project.name}",
+            "=" * 40,
+            "\nChecks:",
+            self._check_line("Git repository", project.has_git),
+            self._check_line("README found", project.has_readme),
+            self._check_line("Tests found", project.has_tests),
+            "\nLanguages:", ]
+
+        lines.append(self._render_languages(project))
+        lines.append("\nTODO items:")
+        lines.append(self._render_list(project.todo_items, "None found"))
+        lines.append("\nConcerns:")
+        lines.append(self._render_list(project.concerns, "No concerns"))
+        lines.append(f"\nProject Score: {project.project_score}/{MAX_PROJECT_SCORE}")
+        return "\n".join(lines)
+
+
+    @staticmethod
+    def _check_line(label: str, passed: bool) -> str:
+        """
+        Return a checkmark line, e.g. '✓ README found' or '✗ README missing'.
+        """
+        return f"✓ {label}" if passed else f"✗ {label} missing"
+
+
+    @staticmethod
+    def _render_languages(project: Project) -> str:
+        if not project.languages:
+            return "No supported languages found"
+        return "\n".join(f"{language}: {lines} lines" for language, lines in project.languages.items())
+
+
+    @staticmethod
+    def _render_list(items: List[str], empty_message: str) -> str:
+        if not items:
+            return empty_message
+        return "\n".join(f"- {item}" for item in items)
+
