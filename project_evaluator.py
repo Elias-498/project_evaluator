@@ -1,14 +1,16 @@
 """
-project_checker.py
+project_evaluator.py
 
-Scans a directory of projects and scores each one based on a set of checks:
-whether it uses version control, has documentation, includes tests, and
-how many TODO comments are still left in the code. The report also counts
-how many files are written in each programming language,
-just to give a sense of what the project is built with. Each check
-contributes to an overall numeric project score, and any problems found
-are recorded as "concerns" so they can be explained in the
-final report.
+Analyzes software projects within a specified directory and generates a
+report for each one. The tool evaluates common software
+development practices by checking for version control, documentation,
+automated tests, and unfinished TODO comments. It also identifies the
+programming languages used throughout each project and calculates an
+overall score based on the results of these checks.
+
+The goal of the Project Evaluator is to automate routine project
+audits, helping developers like myself quickly identify missing components, maintain
+consistent project standards, and monitor the overall quality of software projects.
 
 """
 
@@ -45,13 +47,19 @@ MIN_PROJECT_SCORE = 0
 
 class Project:
     """
-    Represents a single project and stores all results collected during analysis.
+    Represents a single project being evaluated
 
-    Each analyzer updates the project's fields as it checks different aspects
-    of the project. Once analysis is finished, the rest of the system should
-    treat the Project as read‑only data.
+    Stores all information collected during analysis, including project
+    metadata, detected concerns, programming languages, TODO items, and the
+    overall score. Each analyzer updates this object as checks are
+    performed.
     """
     def __init__(self, name, path):
+        """
+        Initializes a Project instances.
+        :param name: Name of project
+        :param path: Path to the project's root directory
+        """
         self.name = name
         self.path = path
 
@@ -66,11 +74,10 @@ class Project:
 
     def add_concerns(self, description: str, penalty: int) -> None:
         """
-        Records a concern found with this project and deducts score.
+        Records a concern updates the project's overall score
 
-        :param description: Explanation of the concern found during analysis
-        :param penalty: How many points should be deducted from the project's score because of the concern
-        :return: None
+        :param description: Description of the concern
+        :param penalty: Number of points deducted from the project score
         """
         self.concerns.append(description)
         self.project_score = max(MIN_PROJECT_SCORE, self.project_score - penalty)
@@ -78,16 +85,20 @@ class Project:
 
 class ProjectScanner:
     """
-    Finds project folders inside a given parent directory.
+    Finds software projects within a  directory.
 
-    This scanner looks at the subdirectories of the provided path
-    and treats each one as a potential project
+    Scans subdirectories of the provided path and treats each one as a potential project
     """
 
     def scan(self, directory: Path) -> List[Project]:
-        """Return a Project object for each subfolder inside the given directory."""
+        """
+        Scans a directory for software projects
+
+        :param directory: Directory containing one or more software projects
+        :return: A list of Project objects
+        """
         projects = []
-        for  entry in directory.iterdir():
+        for entry in directory.iterdir():
             if entry.is_dir():
                 projects.append(Project(entry.name, entry))
 
@@ -95,13 +106,17 @@ class ProjectScanner:
 
 class DocumentationAnalyzer:
     """
-    Checks if a project has a README file.
+    Evaluates projects documentation
 
-    Analyzer checks the project's main folder to see if it has a README
-    file. It looks for any of the usual README names, and if none are found,
-    it marks the project as missing documentation and applies a score penalty
+    Checks whether a project contains a recognized README file and records a
+    concern if documentation is missing.
     """
     def analyze(self, project: Project) -> None:
+        """
+        Evaluates the project's documentation.
+
+        :param project: Project being analyzed
+        """
         for filename in README_FILENAME:
             if (project.path / filename).exists():
                 project.has_readme = True
@@ -112,17 +127,26 @@ class DocumentationAnalyzer:
 
 
 class GitAnalyzer:
-    """Checks if a project is tracked with Git."""
+    """
+    Evaluates version control configuration
 
+    Determines whether a project is tracked using Git and records a concern
+    if no Git repository is detected.
+    """
     def analyze(self, project: Project) -> None:
         project.has_git = (project.path / ".git").exists()
+
         if not project.has_git:
             project.add_concerns("No Git repository", PENALTY_MISSING_GIT)
 
 
 class TestAnalyzer:
-    """Checks whether a project has a test/tests folder."""
+    """
+    Evaluates automated testing support
 
+    Checks whether the project contains a standard test directory and
+    records a concern if no automated tests are found
+    """
     def analyze(self, project: Project) -> None:
         project.has_tests = any(
             (project.path / folder_name).exists() for folder_name in TEST_FILENAME
@@ -133,20 +157,23 @@ class TestAnalyzer:
 
 class CodeAnalyzer:
     """
-    Analyzes a project's source files to determine which programming
-    languages are used and to collect any TODO comments left in the code.
+    Analyzes source code within a project
 
-    This helps identify unfinished work and gives a rough picture of
-    how many lines of code is written in each language.
+    Collects information about programming languages used throughout the
+    project and identifies unfinished TODO comments that may require
+    developer attention.
     """
 
     def analyze(self, project: Project) -> None:
         """
-        Checks through all source files in the project and updates its language statistics and TODO list.
-        :param project: project being analyzed
-        :return: None
+        Analyzes all source files within a project
+
+        Updates language statistics, records TODO comments, and applies a score
+        penalty if the number of TODO items exceeds the configured threshold
+
+        :param project: Project being analyzed
         """
-        for file_path in self.source_files(project.path):
+        for file_path in self._source_files(project.path):
             self._record_programming_language(project, file_path)
             self._record_todos(project, file_path)
 
@@ -156,12 +183,14 @@ class CodeAnalyzer:
                 PENALTY_EXCESSIVE_TODOS,
                 )
 
-    def source_files(self, root: Path):
+    def _source_files(self, root: Path):
         """
-        Yield every source file under root and skips ignored directories.
+        Iterates over all source files within a project
 
-        Skips folders that should not be analyzed, such as virtual
+        Skips directories that should not be analyzed, such as virtual
         environments, cache directories, or other ignored paths
+
+        :param root: Root directory of the project
         """
         for path in root.rglob("*"):
             # Skip if not a file
@@ -169,15 +198,17 @@ class CodeAnalyzer:
                 continue
             if any(ignored in path.parts for ignored in IGNORED_DIRECTORY_NAMES):
                 continue
-            yield path
+            yield path # one at a time
 
     def _record_programming_language(self, project: Project, file_path: Path) -> None:
         """
-        Records which programming language the project uses based on the file's
-        extension
+        Records the programming language a source file
+
+        The language is determined from the file extension and added to the
+        project's language statistics
 
         :param project: project being analyzed
-        :param file_path: The files whose extension is used to identify the language.
+        :param file_path: source file being analyzed
         """
         language = EXTENSIONS_TO_HUMAN_LANGUAGE.get(file_path.suffix)
         if language is None:
@@ -186,7 +217,9 @@ class CodeAnalyzer:
 
     def _record_todos(self, project: Project, file_path: Path) -> None:
         """
-        Scans a file for TODO comments and records each one with its line number.
+        Searches a source file for TODO comments
+
+        Each TODO comment is recorded
 
         :param project: project being analyzed
         :param file_path: The file  being scanned for TODO comments
@@ -203,16 +236,19 @@ class CodeAnalyzer:
 
 class ReportGenerator:
     """
-    Turns analyzed Project into a readable report.
+    Generates readable project evaluation reports
 
-    Each project is rendered as its own section, showing the results of all
-    checks, the languages detected, any TODOs found, concerns raised, and
-    the final project score.
+    Formats the results collected during analysis into a structured report
+    that summarizes project score, detected concerns, supported languages,
+    and completed evaluation checks
     """
 
     def generate(self, projects: List[Project]) -> str:
         """
-        Build the full report as a single string.
+        Builds a report for all evaluated projects
+
+        :param projects: List of projects
+        :return: Formatted report as a string
         """
         sections = [self._render_project(project) for project in projects]
         return "\n".join(sections)
@@ -220,25 +256,21 @@ class ReportGenerator:
 
     def _render_project(self, project: Project) -> str:
         """
-        Renders a single project's results into a readable text block
+        Renders a single project's evaluation results
 
-        Includes checks for Git, README and tests,
-        programming language used,
-        TODO items,
-        concerns raised and
-        final project score.
+        Creates a summary including completed checks, programming languages,
+        TODO items, concerns, and the final score.
+
+        :param project: Project to format
+        :return: Formatted report as a string
         """
-        lines = [
-            "\n" + "=" * 40,
-            f"Project: {project.name}",
-            "=" * 40,
-            "\nChecks:",
+        lines = ["\n" + "=" * 40, f"Project: {project.name}", "=" * 40, "\nChecks:",
             self._check_line("Git repository", project.has_git),
             self._check_line("README found", project.has_readme),
             self._check_line("Tests found", project.has_tests),
             "\nLanguages:", ]
 
-        lines.append(self._render_languages(project))
+        lines.append(self._render_programming_languages(project))
         lines.append("\nTODO items:")
         lines.append(self._render_list(project.todo_items, "None found"))
         lines.append("\nConcerns:")
@@ -250,30 +282,44 @@ class ReportGenerator:
     @staticmethod
     def _check_line(label: str, passed: bool) -> str:
         """
-        Return a checkmark line, e.g. '✓ README found' or '✗ README missing'.
+        Returns an evaluation check
         """
         return f"✓ {label}" if passed else f"✗ {label} missing"
 
 
     @staticmethod
-    def _render_languages(project: Project) -> str:
+    def _render_programming_languages(project: Project) -> str:
+        """
+        Formats the project's detected programming languages
+
+        :param project: Project whose language statistics will be displayed
+        :return: Formatted language summary
+        """
         if not project.programming_languages:
             return "No supported languages found"
         return "\n".join(f"{language}: {count} file(s)" for language, count in project.programming_languages.items())
 
     @staticmethod
     def _render_list(items: List[str], empty_message: str) -> str:
+        """
+        Returns a formatted list
+
+        :param items: Items to include in the report
+        :param empty_message: Message shown when no items are present
+        :return: Formatted list or empty message
+        """
         if not items:
             return empty_message
         return "\n".join(f"- {item}" for item in items)
 
 
-class ProjectScoreChecker:
+class ProjectScoreEvaluator:
     """
-    Handles whole process of scoring projects: scanning a folder,
-    running all analyzers, and producing a final report.
-    """
+    Coordinates the complete project evaluation process.
 
+    Responsible for discovering projects, executing all analyzers, and
+    generating the final evaluation report
+    """
     def __init__(self) -> None:
         self.scanner = ProjectScanner()
         self.analyzers = [
@@ -286,11 +332,12 @@ class ProjectScoreChecker:
 
     def check(self, directory: Path) -> str:
         """
-        Look through the given directory, find all projects inside it,
-        analyze each one, and return a full report
+        Evaluates every project within a directory
 
-        :param directory: Contains projects to be analyzed
-        :return: A report summarizing all projects found  in the folder
+        Each discovered project is analyzed before a final report is generated
+
+        :param directory: Contains software projects to be analyzed
+        :return: Formatted evaluation report
         """
         projects = self.scanner.scan(directory)
         for project in projects:
@@ -301,7 +348,7 @@ class ProjectScoreChecker:
 
 def main() -> None:
     folder = input("Enter projects folder: ").strip()
-    checker = ProjectScoreChecker()
+    checker = ProjectScoreEvaluator()
     print(checker.check(Path(folder)))
 
 
@@ -439,7 +486,7 @@ class TestCodeAnalyzer(unittest.TestCase):
             self.assertEqual(project.todo_items, [])
             self.assertEqual(project.programming_languages, {})
 
-    def test_excessive_todos_flagged_as_concern(self) -> None:
+    def test_excessive_todos_as_concern(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             todo_lines = "\n".join(f"# TODO item {i}" for i in range(EXCESSIVE_TODO_THRESHOLD + 1))
@@ -451,10 +498,12 @@ class TestCodeAnalyzer(unittest.TestCase):
             self.assertTrue(any("Too many TODOs left in code" in concern for concern in project.concerns))
 
 
-class TestProjectScoreCheckerIntegration(unittest.TestCase):
-    """End-to-end test running the full pipeline against a small fake project."""
+class TestProjectEvaluatorIntegration(unittest.TestCase):
+    """
+    Test full made up projects
+    """
 
-    def test_full_pipeline_on_well_formed_project(self) -> None:
+    def test_full_well_formed_project(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             project_dir = root / "well_formed_project"
@@ -464,20 +513,20 @@ class TestProjectScoreCheckerIntegration(unittest.TestCase):
             (project_dir / "tests").mkdir()
             (project_dir / "main.py").write_text("print('hello world')\n")
 
-            report = ProjectScoreChecker().check(root)
+            report = ProjectScoreEvaluator().check(root)
 
             self.assertIn("well_formed_project", report)
             self.assertIn("Project Score: 100/100", report)
             self.assertIn("Python: 1 file(s)", report)
 
-    def test_full_pipeline_on_neglected_project(self) -> None:
+    def test_full_neglected_project(self) -> None:
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             project_dir = root / "neglected_project"
             project_dir.mkdir()
             (project_dir / "main.py").write_text("print('no tests, no docs')\n")
 
-            report = ProjectScoreChecker().check(root)
+            report = ProjectScoreEvaluator().check(root)
 
             expected_score = (MAX_PROJECT_SCORE - PENALTY_MISSING_README - PENALTY_MISSING_GIT - PENALTY_MISSING_TESTS)
 
@@ -489,5 +538,5 @@ class TestProjectScoreCheckerIntegration(unittest.TestCase):
 
 if __name__ == "__main__":
     import sys
-    print("Running automated test suite for project_checker.py...\n")
+    print("Running automated test suite for project_evaluator.py...\n")
     unittest.main(verbosity=2, argv=[sys.argv[0]])
